@@ -1,0 +1,109 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>component-012 — PAPERCUT</title>
+  </head>
+  <body>
+    <!-- Fixed centre-stage headline: lives outside the smoothed content so
+         position:fixed works and so it can blend against the cards that
+         pass beneath it; JS swaps its text to the row crossing centre. -->
+    <div class="index-title" aria-hidden="true"></div>
+
+    <div id="smooth-wrapper">
+      <div id="smooth-content">
+        <main>
+          <ul class="index">
+            <li class="row" data-title="Scarlet Harvest">
+              <div class="row__head">
+                <span class="tag">Scarlet®</span>
+                <span class="tag">Harvest 01</span>
+              </div>
+              <div class="row__body">
+                <figure class="row__media">
+                  <div class="row__clip">
+                    <img src="/assets/vivid-1.jpg" alt="Trays of bright red strawberries" />
+                  </div>
+                </figure>
+              </div>
+            </li>
+
+            <li class="row" data-title="Plumeria Bloom">
+              <div class="row__head">
+                <span class="tag">Plumeria</span>
+                <span class="tag">Bloom S-02</span>
+              </div>
+              <div class="row__body">
+                <figure class="row__media">
+                  <div class="row__clip">
+                    <img src="/assets/vivid-2.jpg" alt="Pink plumeria blossoms against a blue sky" />
+                  </div>
+                </figure>
+              </div>
+            </li>
+
+            <li class="row" data-title="Rubus Still">
+              <div class="row__head">
+                <span class="tag">Rubus</span>
+                <span class="tag">Still Life 03</span>
+              </div>
+              <div class="row__body">
+                <figure class="row__media">
+                  <div class="row__clip">
+                    <img src="/assets/vivid-3.jpg" alt="Raspberries piled in a white teacup" />
+                  </div>
+                </figure>
+              </div>
+            </li>
+
+            <li class="row" data-title="Morning Light">
+              <div class="row__head">
+                <span class="tag">Morning</span>
+                <span class="tag">Table Light 04</span>
+              </div>
+              <div class="row__body">
+                <figure class="row__media">
+                  <div class="row__clip">
+                    <img src="/assets/vivid-4.jpg" alt="Strawberries and oats over yogurt in a white bowl" />
+                  </div>
+                </figure>
+              </div>
+            </li>
+
+            <li class="row" data-title="Meadow Field">
+              <div class="row__head">
+                <span class="tag">Meadow</span>
+                <span class="tag">Field Study 05</span>
+              </div>
+              <div class="row__body">
+                <figure class="row__media">
+                  <div class="row__clip">
+                    <img src="/assets/vivid-5.jpg" alt="Cattle grazing on a vivid green plain under storm clouds" />
+                  </div>
+                </figure>
+              </div>
+            </li>
+
+            <li class="row" data-title="Stillwater Alpine">
+              <div class="row__head">
+                <span class="tag">Stillwater</span>
+                <span class="tag">Alpine 06</span>
+              </div>
+              <div class="row__body">
+                <figure class="row__media">
+                  <div class="row__clip">
+                    <img src="/assets/vivid-6.jpg" alt="Hiker at a mirror-still alpine lake below the Matterhorn" />
+                  </div>
+                </figure>
+              </div>
+            </li>
+          </ul>
+        </main>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,234 @@
+/* ------------------------------------------------------------------
+ * PAPERCUT — infinite scrolling project index.
+ * Hairline-ruled rows loop forever over a permanent dark canvas. One
+ * fixed headline sits at the exact viewport centre, layered OVER the
+ * scrolled content and knocked through it with mix-blend-mode:
+ * difference; GSAP swaps its text as rows cross the middle.
+ * ---------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Permanent dark canvas — the index lives on black. */
+:root {
+  --bg: #0a0a0a;
+  --ink: #eceae5;
+  --ink-soft: rgba(236, 234, 229, 0.55);
+  --rule: rgba(236, 234, 229, 0.24);
+  --font-sans: "Helvetica Neue", Helvetica, "Arial Nova", Arial, sans-serif;
+}
+
+html {
+  /* endless loop — a scrollbar position is meaningless and would be
+   * seen jumping on every wrap */
+  scrollbar-width: none;
+}
+
+html::-webkit-scrollbar {
+  display: none;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+}
+
+img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* JS adds .is-live and drives a virtual scroll: the wrapper becomes the
+ * fixed viewport and #smooth-content is translated by hand, so the loop
+ * can wrap instantly with zero glide. Without JS (or with reduced
+ * motion) the page stays a plain scrollable document. */
+#smooth-wrapper {
+  position: relative;
+  z-index: 1;
+}
+
+html.is-live,
+.is-live body {
+  height: 100%;
+  overflow: hidden;
+}
+
+.is-live body {
+  touch-action: none;
+}
+
+.is-live #smooth-wrapper {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+.is-live #smooth-content {
+  will-change: transform;
+}
+
+/* --- fixed centre-stage headline ----------------------------------- */
+
+/* Sits ABOVE the scrolled content and inverts whatever passes under it:
+ * pure white + difference reads as near-white on the black canvas and
+ * flips to the photo's negative wherever a card crosses the centreline.
+ * The blend backdrop is everything painted below it in the root stacking
+ * context — so nothing between here and the cards may `isolate`. */
+.index-title {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  width: max-content;
+  font-size: clamp(4rem, 18vw, 8rem);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  white-space: nowrap;
+  color: #fff;
+  mix-blend-mode: difference;
+  pointer-events: none;
+}
+
+/* Hover-to-reveal (mouse/trackpad only — touch keeps it always on):
+ * hidden until JS flags the pointer as being over the centre card. */
+@media (hover: hover) {
+  .is-live .index-title {
+    opacity: 0;
+    transition: opacity 0.35s ease;
+  }
+
+  .is-live .index-title.is-visible {
+    opacity: 1;
+  }
+}
+
+/* --- small meta labels ------------------------------------------- */
+
+.tag {
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* --- index rows ---------------------------------------------------- */
+
+.index {
+  list-style: none;
+}
+
+.row {
+  position: relative;
+  border-top: 1px solid var(--rule);
+}
+
+/* Overlaid on the band, not part of the flow — the body owns the full
+ * row height and the labels pin to the top rule. */
+.row__head {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  padding: 0.55rem 1.25rem;
+  pointer-events: none;
+}
+
+.row__body {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 0.5rem 0;
+}
+
+/* Cards are wide, constant-width strips. Layout height is the FULL
+ * (centre-stage) height; JS crops it vertically via clip-path by
+ * distance from centre, so a card is a thin slit at the edges and a
+ * full window at the middle — and can never paint outside its band. */
+.row__media {
+  position: relative;
+  width: min(30vw, 31rem);
+  height: var(--media-h, 36vh);
+  will-change: transform;
+}
+
+/* First-paint staging: closed like a paper cut; JS opens it by centre
+ * distance. The inner img is oversized so the parallax never shows edges. */
+.row__clip {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  clip-path: inset(41% 0 41% 0);
+  will-change: clip-path;
+}
+
+/* --- small screens -------------------------------------------------- */
+
+@media (max-width: 720px) {
+  /* nowrap at 18vw runs a two-word title clean off both edges on a
+   * phone — let it wrap inside the viewport and centre the block. */
+  .index-title {
+    width: min(90vw, 26rem);
+    font-size: clamp(2.25rem, 13vw, 4.5rem);
+    letter-spacing: -0.03em;
+    white-space: normal;
+    text-align: center;
+    text-wrap: balance;
+  }
+
+  .row__head {
+    padding: 0.5rem 0.9rem;
+  }
+
+  .tag {
+    font-size: 0.58rem;
+    letter-spacing: 0.06em;
+  }
+
+  .row__body {
+    padding: 1.2rem 0;
+  }
+
+  /* a 35vw strip reads as a sliver next to the headline — give the card
+   * real presence and keep it inside the band */
+  .row__media {
+    width: min(62vw, 20rem);
+    --media-h: 30vh;
+  }
+}
+
+/* short/landscape phones: the ladder needs room for the neighbouring rows */
+@media (max-width: 720px) and (max-height: 560px) {
+  .index-title {
+    font-size: clamp(1.75rem, 9vw, 3rem);
+  }
+
+  .row__media {
+    --media-h: 42vh;
+  }
+}
+
+/* --- reduced motion: everything readable without the scrub ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .index-title {
+    display: none;
+  }
+
+  .row__clip {
+    clip-path: inset(0);
+  }
+}

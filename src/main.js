@@ -1,0 +1,281 @@
+import "./style.css";
+import { gsap } from "gsap";
+import { Observer } from "gsap/Observer";
+
+/*
+ * PAPERCUT infinite index — virtual-scroll conductor.
+ * Markup lives in index.html; static styling, theming vars and
+ * first-paint staging live in style.css.
+ *
+ * The page does NOT scroll natively. An Observer collects wheel /
+ * touch / drag / arrow-key input into an unbounded `target`; a lerp
+ * eases `current` toward it every tick, and the content is translated
+ * by `current` wrapped into the middle of three cloned copies. Because
+ * the wrap happens in the modulo — never as a scroll jump — the loop
+ * is seamless in both directions and can never glide backwards.
+ *
+ * Everything is derived from `current` in one ticker pass per frame:
+ *   drum bend   rotateX + scale ladder from distance to centre
+ *   unveil      clip-path slit opens as a row climbs to centre stage
+ *   parallax    photo drifts/settles inside its card
+ *   headline    fixed at viewport centre over the cards (blended in
+ *               CSS), text = row crossing centre
+ *   snap        on idle, target tweens to the nearest card centre,
+ *               biased in the travel direction so a flick always steps
+ */
+
+gsap.registerPlugin(Observer);
+
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+if (!reduceMotion) {
+  document.documentElement.classList.add("is-live");
+
+  const content = document.querySelector("#smooth-content");
+  const list = document.querySelector(".index");
+  const originals = gsap.utils.toArray(".row", list);
+  const COPIES = 3;
+
+  for (let c = 0; c < COPIES - 1; c++) {
+    originals.forEach((row) => {
+      const clone = row.cloneNode(true);
+      clone.setAttribute("aria-hidden", "true");
+      list.appendChild(clone);
+    });
+  }
+
+  const rows = gsap.utils.toArray(".row", list);
+  const cards = rows.map((row) => ({
+    el: row,
+    media: row.querySelector(".row__media"),
+    clip: row.querySelector(".row__clip"),
+    lastPoly: "",
+  }));
+
+  // --- tuning ------------------------------------------------------
+
+  const MIN_VIS = 0.3; // edge cards open to this fraction of full height
+  const MAX_NARROW = 8; // % clipped from each side at the viewport edges
+  const CURVE = 1.8; // barrel exponent: flat at centre, bowing to the edges
+  const EDGE_SAMPLES = 6; // polygon points per side tracing the curve
+  const LADDER_ROWS = 2.2; // rows from centre until the ladder bottoms out
+  const LERP = 3.8; // scroll ease (higher = tighter follow)
+  const SNAP_DELAY = 200; // ms of quiet before snapping
+  const SNAP_BIAS = 0.28; // fraction of a step: flicks always advance
+
+  // --- layout maths (recomputed on resize) --------------------------
+
+  let pitch = 0; // one row, top to top
+  let copyH = 0; // one full copy of the list
+  let rowTop0 = 0; // static top of row 0 inside the content
+  let mediaMid = 0; // media centre measured from its row top
+  let mediaH = 0; // full (centre-stage) card height
+  let mediaW = 0; // card width (constant strips)
+  let headH = 0; // label band: row top to media top
+  let bandC = 0; // per-row constant chrome (labels + paddings)
+  let vh = window.innerHeight;
+
+  const measure = () => {
+    vh = window.innerHeight;
+    // offsetTop/offsetHeight are pure layout values — unlike rects they
+    // can never be polluted by the transforms this engine applies
+    pitch = rows[1].offsetTop - rows[0].offsetTop;
+    copyH = pitch * originals.length;
+    rowTop0 = rows[0].offsetTop;
+    const m = cards[0].media;
+    mediaH = m.offsetHeight;
+    mediaW = m.offsetWidth;
+    headH = m.offsetTop - rows[0].offsetTop;
+    mediaMid = headH + mediaH / 2;
+    bandC = pitch - mediaH;
+  };
+
+  // scroll position that puts card n dead-centre
+  const snapPos = (n) => rowTop0 + mediaMid - vh / 2 + n * pitch;
+
+  // --- virtual scroll state -----------------------------------------
+
+  const pos = { current: 0, target: 0 };
+  let snapTween = null;
+  let lastInput = 0;
+  let lastDir = 0;
+
+  const onInput = (delta) => {
+    lastInput = performance.now();
+    if (snapTween) {
+      snapTween.kill();
+      snapTween = null;
+    }
+    pos.target += delta;
+    if (delta) lastDir = Math.sign(delta);
+  };
+
+  Observer.create({
+    target: window,
+    type: "wheel,touch,pointer",
+    preventDefault: true,
+    onChangeY(self) {
+      const wheel = self.event.type === "wheel";
+      onInput(self.deltaY * (wheel ? 1 : -2.2));
+    },
+  });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" || e.key === "PageDown") onInput(pitch);
+    else if (e.key === "ArrowUp" || e.key === "PageUp") onInput(-pitch);
+  });
+
+  const snap = () => {
+    const n = Math.round((pos.target - snapPos(0)) / pitch + lastDir * SNAP_BIAS);
+    const dest = snapPos(n);
+    if (Math.abs(dest - pos.target) < 1) return;
+    snapTween = gsap.to(pos, {
+      target: dest,
+      duration: 1.1,
+      ease: "power3.out",
+      onComplete: () => (snapTween = null),
+    });
+  };
+
+  // --- fixed centre-stage headline ----------------------------------
+
+  const titleEl = document.querySelector(".index-title");
+
+  // The headline never moves — it sits dead-centre and only its text
+  // value swaps when a new project takes the centreline.
+  let currentTitle = "";
+  const setActive = (row) => {
+    const text = row.dataset.title;
+    if (text === currentTitle) return;
+    currentTitle = text;
+    titleEl.textContent = text;
+  };
+
+  // Hover-to-reveal: the headline only shows while the pointer is over
+  // the centre-stage card, whose rect is always a mediaW × mediaH box
+  // dead-centre in the viewport. Touch devices have no hover, so there
+  // the title stays permanently visible (CSS gates on hover: hover).
+  if (window.matchMedia("(hover: hover)").matches) {
+    window.addEventListener("pointermove", (e) => {
+      const overCentre =
+        Math.abs(e.clientX - window.innerWidth / 2) < mediaW / 2 &&
+        Math.abs(e.clientY - vh / 2) < mediaH / 2;
+      titleEl.classList.toggle("is-visible", overCentre);
+    });
+    document.documentElement.addEventListener("mouseleave", () =>
+      titleEl.classList.remove("is-visible"),
+    );
+  }
+
+  // --- the one render pass ------------------------------------------
+
+  const wrap = gsap.utils.wrap(0, 1);
+
+  // Ladder in row units from the continuous centre index: a card |u|
+  // rows from centre opens to vis(u) of its full height.
+  const visAt = (au) =>
+    MIN_VIS + (1 - MIN_VIS) * (1 - Math.min(au, LADDER_ROWS) / LADDER_ROWS);
+
+  // On-screen distance from the centreline to a card |u| rows away =
+  // the integral of (label band + visible card height) per row, so each
+  // row occupies exactly what its opened height needs — the accordion
+  // is built into the geometry and copies tile seamlessly.
+  const spanTo = (au) => {
+    const lin = Math.min(au, LADDER_ROWS);
+    const visInt =
+      MIN_VIS * au + (1 - MIN_VIS) * (lin - (lin * lin) / (2 * LADDER_ROWS));
+    return bandC * au + mediaH * visInt;
+  };
+
+  const render = (force) => {
+    // middle-copy translate: identical pixels on every wrap, no jump
+    const v = copyH + wrap(pos.current / copyH) * copyH;
+    gsap.set(content, { y: -v });
+
+    const mid = vh / 2;
+    // fractional row index whose card centre sits on the centreline
+    const f = (v + mid - rowTop0 - mediaMid) / pitch;
+
+    for (let i = 0; i < cards.length; i++) {
+      const card = cards[i];
+      const u = i - f;
+      const au = Math.abs(u);
+
+      const vis = visAt(au);
+      const visH = vis * mediaH;
+      const posC = mid + Math.sign(u) * spanTo(au); // card centre on screen
+      const visTop = posC - visH / 2;
+
+      // place the row so its label band sits tight above the open strip.
+      // ALWAYS written: v wraps by a copy-height, so a stale row translate
+      // would relocate a parked row a full copy away — into the viewport.
+      const rowTopScreen = rowTop0 + i * pitch - v;
+      gsap.set(card.el, { y: visTop - headH - rowTopScreen });
+
+      // card effects can be skipped while parked offscreen
+      if (!force && (visTop > vh * 1.3 || visTop + visH < -vh * 0.3)) continue;
+
+      // Rolling window: the clip opens toward centre and slides across the
+      // photo by position — cards above centre show the lower crop, cards
+      // below the upper crop — so the image content rolls like a drum.
+      const d = gsap.utils.clamp(-1, 1, u / LADDER_ROWS);
+      const closed = 1 - vis;
+      const topShare = 0.5 - 0.5 * d; // 1 above centre, 0 below
+      const topT = closed * topShare * 100;
+      const botT = closed * (1 - topShare) * 100;
+
+      // pin the window's top edge to visTop no matter where it sits
+      gsap.set(card.media, { y: -closed * topShare * mediaH });
+
+      // Barrel sides: ONE global narrowing curve of screen position — the
+      // centreline is untouched, so the centred card stays a fixed rect and
+      // every card's side edges bow along the same continuous curve.
+      const winTop = topT;
+      const winH = 100 - topT - botT;
+      const leftPts = [];
+      const rightPts = [];
+      for (let k = 0; k < EDGE_SAMPLES; k++) {
+        const fkey = k / (EDGE_SAMPLES - 1);
+        const yPct = winTop + winH * fkey; // % within the media box
+        const yScr = visTop + visH * fkey; // same scanline on screen
+        const n =
+          MAX_NARROW *
+          Math.pow(Math.min(1, Math.abs(yScr - mid) / (vh * 0.55)), CURVE);
+        leftPts.push(`${n.toFixed(2)}% ${yPct.toFixed(2)}%`);
+        rightPts.unshift(`${(100 - n).toFixed(2)}% ${yPct.toFixed(2)}%`);
+      }
+      const poly = `polygon(${leftPts.join(",")},${rightPts.join(",")})`;
+      if (poly !== card.lastPoly) {
+        card.lastPoly = poly;
+        gsap.set(card.clip, { clipPath: poly });
+      }
+    }
+
+    // headline belongs to the row nearest the centreline
+    const active = rows[gsap.utils.clamp(0, rows.length - 1, Math.round(f))];
+    if (active) setActive(active);
+  };
+
+  gsap.ticker.add((time, deltaMS) => {
+    pos.current += (pos.target - pos.current) * Math.min(1, (deltaMS / 1000) * LERP);
+    if (!snapTween && performance.now() - lastInput > SNAP_DELAY) snap();
+    render(false);
+  });
+
+  // --- boot + resize -------------------------------------------------
+
+  measure();
+  pos.current = pos.target = snapPos(originals.length); // middle copy, card 0 centred
+  render(true);
+
+  let resizeT;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeT);
+    resizeT = setTimeout(() => {
+      const n = Math.round((pos.target - snapPos(0)) / pitch); // keep the same card
+      measure();
+      pos.current = pos.target = snapPos(n);
+      render(true);
+    }, 150);
+  });
+}
