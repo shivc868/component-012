@@ -49,7 +49,7 @@ if (!reduceMotion) {
     el: row,
     media: row.querySelector(".row__media"),
     clip: row.querySelector(".row__clip"),
-    lastPoly: "",
+    lastClip: "",
   }));
 
   // --- tuning ------------------------------------------------------
@@ -71,6 +71,7 @@ if (!reduceMotion) {
   let mediaMid = 0; // media centre measured from its row top
   let mediaH = 0; // full (centre-stage) card height
   let mediaW = 0; // card width (constant strips)
+  let clipR = 0; // corner radius for the clip window (from --clip-r)
   let headH = 0; // label band: row top to media top
   let bandC = 0; // per-row constant chrome (labels + paddings)
   let vh = window.innerHeight;
@@ -85,6 +86,10 @@ if (!reduceMotion) {
     const m = cards[0].media;
     mediaH = m.offsetHeight;
     mediaW = m.offsetWidth;
+    clipR =
+      parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--clip-r"),
+      ) || 0;
     headH = m.offsetTop - rows[0].offsetTop;
     mediaMid = headH + mediaH / 2;
     bandC = pitch - mediaH;
@@ -227,27 +232,50 @@ if (!reduceMotion) {
       // pin the window's top edge to visTop no matter where it sits
       gsap.set(card.media, { y: -closed * topShare * mediaH });
 
-      // Barrel sides: ONE global narrowing curve of screen position — the
-      // centreline is untouched, so the centred card stays a fixed rect and
-      // every card's side edges bow along the same continuous curve.
+      // Barrel sides + rounded corners: polygon() can't take a radius, so
+      // the clip is an SVG path — the same ONE global narrowing curve of
+      // screen position traces the sides, and a quadratic arc turns each
+      // corner. path() is px-based; the clip box is exactly mediaW × mediaH,
+      // so the % maths converts straight to px.
       const winTop = topT;
       const winH = 100 - topT - botT;
-      const leftPts = [];
-      const rightPts = [];
-      for (let k = 0; k < EDGE_SAMPLES; k++) {
-        const fkey = k / (EDGE_SAMPLES - 1);
-        const yPct = winTop + winH * fkey; // % within the media box
-        const yScr = visTop + visH * fkey; // same scanline on screen
+      const winHpx = (winH / 100) * mediaH; // visible window height in px
+      const r = Math.min(clipR, winHpx / 2, mediaW / 4);
+      const rf = winHpx > 0 ? r / winHpx : 0; // corner span as window fraction
+
+      const yAt = (fk) => ((winTop + winH * fk) / 100) * mediaH;
+      const lAt = (fk) => {
+        const yScr = visTop + visH * fk; // same scanline on screen
         const n =
           MAX_NARROW *
           Math.pow(Math.min(1, Math.abs(yScr - mid) / (vh * 0.55)), CURVE);
-        leftPts.push(`${n.toFixed(2)}% ${yPct.toFixed(2)}%`);
-        rightPts.unshift(`${(100 - n).toFixed(2)}% ${yPct.toFixed(2)}%`);
+        return (n / 100) * mediaW; // left inset in px; right = mediaW - this
+      };
+
+      const fx = (v) => v.toFixed(2);
+      const y0 = yAt(0);
+      const y1 = yAt(1);
+      const l0 = lAt(0);
+      const l1 = lAt(1);
+      const seg = [`M ${fx(l0 + r)} ${fx(y0)}`];
+      seg.push(`L ${fx(mediaW - l0 - r)} ${fx(y0)}`); // top edge
+      seg.push(`Q ${fx(mediaW - l0)} ${fx(y0)} ${fx(mediaW - lAt(rf))} ${fx(yAt(rf))}`);
+      for (let k = 1; k < EDGE_SAMPLES; k++) {
+        const fk = rf + (1 - 2 * rf) * (k / (EDGE_SAMPLES - 1)); // right side down
+        seg.push(`L ${fx(mediaW - lAt(fk))} ${fx(yAt(fk))}`);
       }
-      const poly = `polygon(${leftPts.join(",")},${rightPts.join(",")})`;
-      if (poly !== card.lastPoly) {
-        card.lastPoly = poly;
-        gsap.set(card.clip, { clipPath: poly });
+      seg.push(`Q ${fx(mediaW - l1)} ${fx(y1)} ${fx(mediaW - l1 - r)} ${fx(y1)}`);
+      seg.push(`L ${fx(l1 + r)} ${fx(y1)}`); // bottom edge
+      seg.push(`Q ${fx(l1)} ${fx(y1)} ${fx(lAt(1 - rf))} ${fx(yAt(1 - rf))}`);
+      for (let k = 1; k < EDGE_SAMPLES; k++) {
+        const fk = 1 - rf - (1 - 2 * rf) * (k / (EDGE_SAMPLES - 1)); // left side up
+        seg.push(`L ${fx(lAt(fk))} ${fx(yAt(fk))}`);
+      }
+      seg.push(`Q ${fx(l0)} ${fx(y0)} ${fx(l0 + r)} ${fx(y0)}`, "Z");
+      const clip = `path("${seg.join(" ")}")`;
+      if (clip !== card.lastClip) {
+        card.lastClip = clip;
+        gsap.set(card.clip, { clipPath: clip });
       }
     }
 
