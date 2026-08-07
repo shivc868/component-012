@@ -78,6 +78,12 @@ html.is-live,
   will-change: transform;
 }
 
+/* rows are re-translated every frame by the accordion — promote them so
+ * the per-frame move is compositing, not repaint */
+.is-live .row {
+  will-change: transform;
+}
+
 /* --- fixed centre-stage headline ----------------------------------- */
 
 /* Sits ABOVE the scrolled content and inverts whatever passes under it:

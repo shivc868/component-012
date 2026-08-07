@@ -20,13 +20,16 @@ import { Observer } from "gsap/Observer";
  *   parallax    photo drifts/settles inside its card
  *   headline    fixed at viewport centre over the cards (blended in
  *               CSS), text = row crossing centre
- *   snap        on idle, target tweens to the nearest card centre,
- *               biased in the travel direction so a flick always steps
+ *   snap        on idle, target tweens to the next card centre in the
+ *               travel direction — never backwards, so the settle can't
+ *               rubber-band against the glide
  */
 
 gsap.registerPlugin(Observer);
 
-const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const reduceMotion = window.matchMedia(
+  "(prefers-reduced-motion: reduce)",
+).matches;
 
 if (!reduceMotion) {
   document.documentElement.classList.add("is-live");
@@ -54,14 +57,13 @@ if (!reduceMotion) {
 
   // --- tuning ------------------------------------------------------
 
-  const MIN_VIS = 0.3; // edge cards open to this fraction of full height
+  const MIN_VIS = 0.18; // edge cards open to this fraction of full height
   const MAX_NARROW = 8; // % clipped from each side at the viewport edges
   const CURVE = 1.8; // barrel exponent: flat at centre, bowing to the edges
   const EDGE_SAMPLES = 6; // polygon points per side tracing the curve
-  const LADDER_ROWS = 2.2; // rows from centre until the ladder bottoms out
+  const LADDER_ROWS = 1.7; // rows from centre until the ladder bottoms out
   const LERP = 3.8; // scroll ease (higher = tighter follow)
   const SNAP_DELAY = 200; // ms of quiet before snapping
-  const SNAP_BIAS = 0.28; // fraction of a step: flicks always advance
 
   // --- layout maths (recomputed on resize) --------------------------
 
@@ -131,13 +133,22 @@ if (!reduceMotion) {
   });
 
   const snap = () => {
-    const n = Math.round((pos.target - snapPos(0)) / pitch + lastDir * SNAP_BIAS);
+    const frac = (pos.target - snapPos(0)) / pitch;
+    // land on the next card centre IN the travel direction — nearest-card
+    // rounding could pick a centre slightly behind an overshot glide and
+    // drag the settle backwards, which read as a jerk ending every gesture
+    const n =
+      lastDir > 0
+        ? Math.ceil(frac - 0.02)
+        : lastDir < 0
+          ? Math.floor(frac + 0.02)
+          : Math.round(frac);
     const dest = snapPos(n);
     if (Math.abs(dest - pos.target) < 1) return;
     snapTween = gsap.to(pos, {
       target: dest,
-      duration: 1.1,
-      ease: "power3.out",
+      duration: 1.5,
+      ease: "expo.out",
       onComplete: () => (snapTween = null),
     });
   };
@@ -181,34 +192,46 @@ if (!reduceMotion) {
   const visAt = (au) =>
     MIN_VIS + (1 - MIN_VIS) * (1 - Math.min(au, LADDER_ROWS) / LADDER_ROWS);
 
-  // On-screen distance from the centreline to a card |u| rows away =
-  // the integral of (label band + visible card height) per row, so each
-  // row occupies exactly what its opened height needs — the accordion
-  // is built into the geometry and copies tile seamlessly.
-  const spanTo = (au) => {
-    const lin = Math.min(au, LADDER_ROWS);
-    const visInt =
-      MIN_VIS * au + (1 - MIN_VIS) * (lin - (lin * lin) / (2 * LADDER_ROWS));
-    return bandC * au + mediaH * visInt;
-  };
+  let lastV = -1;
 
   const render = (force) => {
     // middle-copy translate: identical pixels on every wrap, no jump
     const v = copyH + wrap(pos.current / copyH) * copyH;
+    // idle short-circuit: nothing moved since last frame → zero work
+    if (!force && v === lastV) return;
+    lastV = v;
     gsap.set(content, { y: -v });
 
     const mid = vh / 2;
     // fractional row index whose card centre sits on the centreline
     const f = (v + mid - rowTop0 - mediaMid) / pitch;
 
+    // Exact pairwise placement: neighbouring centres sit half of each
+    // card's visible height plus the label chrome apart, accumulated
+    // outward from the pair straddling the centreline. (A continuous
+    // integral of row height undershoots wherever a pair straddles the
+    // ladder's bottom-out kink, letting a strip poke past the next
+    // row's rule — accumulation makes overlap impossible.) Positions
+    // depend only on i - f, so the three copies still tile seamlessly.
+    const visArr = [];
+    for (let i = 0; i < cards.length; i++) visArr.push(visAt(Math.abs(i - f)));
+    const gapTo = (a, b) => bandC + (mediaH * (visArr[a] + visArr[b])) / 2;
+
+    const posArr = new Array(cards.length);
+    const j = gsap.utils.clamp(1, cards.length - 1, Math.ceil(f)); // i - f ∈ [0, 1)
+    posArr[j] = mid + (j - f) * gapTo(j - 1, j);
+    for (let i = j + 1; i < cards.length; i++)
+      posArr[i] = posArr[i - 1] + gapTo(i - 1, i);
+    for (let i = j - 1; i >= 0; i--)
+      posArr[i] = posArr[i + 1] - gapTo(i, i + 1);
+
     for (let i = 0; i < cards.length; i++) {
       const card = cards[i];
       const u = i - f;
-      const au = Math.abs(u);
 
-      const vis = visAt(au);
+      const vis = visArr[i];
       const visH = vis * mediaH;
-      const posC = mid + Math.sign(u) * spanTo(au); // card centre on screen
+      const posC = posArr[i]; // card centre on screen
       const visTop = posC - visH / 2;
 
       // place the row so its label band sits tight above the open strip.
@@ -259,12 +282,16 @@ if (!reduceMotion) {
       const l1 = lAt(1);
       const seg = [`M ${fx(l0 + r)} ${fx(y0)}`];
       seg.push(`L ${fx(mediaW - l0 - r)} ${fx(y0)}`); // top edge
-      seg.push(`Q ${fx(mediaW - l0)} ${fx(y0)} ${fx(mediaW - lAt(rf))} ${fx(yAt(rf))}`);
+      seg.push(
+        `Q ${fx(mediaW - l0)} ${fx(y0)} ${fx(mediaW - lAt(rf))} ${fx(yAt(rf))}`,
+      );
       for (let k = 1; k < EDGE_SAMPLES; k++) {
         const fk = rf + (1 - 2 * rf) * (k / (EDGE_SAMPLES - 1)); // right side down
         seg.push(`L ${fx(mediaW - lAt(fk))} ${fx(yAt(fk))}`);
       }
-      seg.push(`Q ${fx(mediaW - l1)} ${fx(y1)} ${fx(mediaW - l1 - r)} ${fx(y1)}`);
+      seg.push(
+        `Q ${fx(mediaW - l1)} ${fx(y1)} ${fx(mediaW - l1 - r)} ${fx(y1)}`,
+      );
       seg.push(`L ${fx(l1 + r)} ${fx(y1)}`); // bottom edge
       seg.push(`Q ${fx(l1)} ${fx(y1)} ${fx(lAt(1 - rf))} ${fx(yAt(1 - rf))}`);
       for (let k = 1; k < EDGE_SAMPLES; k++) {
@@ -285,7 +312,10 @@ if (!reduceMotion) {
   };
 
   gsap.ticker.add((time, deltaMS) => {
-    pos.current += (pos.target - pos.current) * Math.min(1, (deltaMS / 1000) * LERP);
+    pos.current +=
+      (pos.target - pos.current) * Math.min(1, (deltaMS / 1000) * LERP);
+    // close out the lerp's asymptote so an idle page truly goes still
+    if (Math.abs(pos.target - pos.current) < 0.02) pos.current = pos.target;
     if (!snapTween && performance.now() - lastInput > SNAP_DELAY) snap();
     render(false);
   });
